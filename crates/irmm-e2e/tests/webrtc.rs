@@ -1,11 +1,9 @@
 //! The P0 transport: browser ↔ agent over a WebRTC DataChannel, signaled via the server.
 
-use std::time::Duration;
-
 use irmm_e2e::rdp::{FakeDesktop, RdpClient};
 use irmm_e2e::rtc::RtcSession;
 use irmm_e2e::*;
-use irmm_proto::{ShellFrame, read_frame, write_frame};
+use irmm_proto::{ShellFrame, write_frame};
 
 #[tokio::test]
 async fn remote_desktop_over_webrtc() {
@@ -36,16 +34,7 @@ async fn shell_over_webrtc() {
     write_frame(&mut s, &ShellFrame::Start { shell: None, cols: 100, rows: 30 }).await.unwrap();
     let cmd = if cfg!(windows) { "Write-Output (\"rtc-\" + (6*7))\r\n" } else { "echo rtc-$((6*7))\n" };
     write_frame(&mut s, &ShellFrame::data(cmd.as_bytes())).await.unwrap();
-    let mut out = String::new();
-    tokio::time::timeout(Duration::from_secs(20), async {
-        while !out.contains("rtc-42") {
-            if let Some(ShellFrame::Data { data }) = read_frame::<_, ShellFrame>(&mut s).await.unwrap() {
-                out.push_str(&String::from_utf8_lossy(&ShellFrame::decode_data(&data).unwrap()));
-            }
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("no output; got {out}"));
+    shell_read_until(&mut s, "rtc-42").await;
     session.close().await;
 }
 

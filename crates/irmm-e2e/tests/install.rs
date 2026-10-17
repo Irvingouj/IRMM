@@ -66,12 +66,14 @@ async fn install_ps1_runs_latest_release_with_token() {
     // Run exactly the command the console shows.
     let record = dir.path().join("args");
     let out = tokio::process::Command::new("cmd.exe")
-        .args(["/C", cmd])
+        .arg("/C")
+        .raw_arg(cmd)
         .env("IRMM_TEST_RECORD", &record)
         .output()
         .await
         .unwrap();
-    assert!(out.status.success(), "install.ps1 failed: {}", String::from_utf8_lossy(&out.stderr));
-    let args = std::fs::read_to_string(&record).unwrap();
+    let output = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "install.ps1 failed: {output}");
+    let args = std::fs::read_to_string(&record).unwrap_or_else(|e| panic!("{e}; output: {output}"));
     assert_eq!(args, format!("install --server {} --token {token}", env.url()));
 }

@@ -4,28 +4,6 @@ use irmm_e2e::*;
 use irmm_proto::{ShellFrame, read_frame, write_frame};
 use serde_json::json;
 
-async fn read_until_contains(s: &mut tokio::io::DuplexStream, needle: &str) -> String {
-    let mut out = String::new();
-    let res = tokio::time::timeout(Duration::from_secs(20), async {
-        loop {
-            match read_frame::<_, ShellFrame>(s).await.unwrap() {
-                Some(ShellFrame::Data { data }) => {
-                    out.push_str(&String::from_utf8_lossy(&ShellFrame::decode_data(&data).unwrap()));
-                    if out.contains(needle) {
-                        return;
-                    }
-                }
-                Some(ShellFrame::Exit { code }) => panic!("shell exited ({code:?}) before {needle:?}; output: {out}"),
-                Some(_) => {}
-                None => panic!("stream closed before {needle:?}; output: {out}"),
-            }
-        }
-    })
-    .await;
-    assert!(res.is_ok(), "timed out waiting for {needle:?}; output so far: {out}");
-    out
-}
-
 #[tokio::test]
 async fn interactive_shell_through_the_gateway() {
     let env = TestEnv::start().await;
@@ -36,7 +14,7 @@ async fn interactive_shell_through_the_gateway() {
     write_frame(&mut s, &ShellFrame::Start { shell: None, cols: 120, rows: 40 }).await.unwrap();
     let cmd = if cfg!(windows) { "Write-Output (\"irmm-\" + (40+2))\r\n" } else { "echo irmm-$((40+2))\n" };
     write_frame(&mut s, &ShellFrame::data(cmd.as_bytes())).await.unwrap();
-    read_until_contains(&mut s, "irmm-42").await;
+    shell_read_until(&mut s, "irmm-42").await;
 
     write_frame(&mut s, &ShellFrame::Resize { cols: 80, rows: 24 }).await.unwrap();
     write_frame(&mut s, &ShellFrame::data(b"exit\r\n")).await.unwrap();

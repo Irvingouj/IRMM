@@ -423,3 +423,35 @@ pub fn workspace_binary(package: &str, bin: &str) -> PathBuf {
     let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
     profile_dir.join(format!("{bin}{}", std::env::consts::EXE_SUFFIX))
 }
+
+/// Reads shell output until it contains `needle`, answering cursor-position queries
+/// the way a terminal does (Windows ConPTY waits for one before running anything).
+pub async fn shell_read_until<S>(s: &mut S, needle: &str) -> String
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    use irmm_proto::{ShellFrame, read_frame, write_frame};
+    let mut out = String::new();
+    let res = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            match read_frame::<_, ShellFrame>(&mut *s).await.unwrap() {
+                Some(ShellFrame::Data { data }) => {
+                    let chunk = String::from_utf8_lossy(&ShellFrame::decode_data(&data).unwrap()).into_owned();
+                    if chunk.contains("\x1b[6n") {
+                        write_frame(&mut *s, &ShellFrame::data(b"\x1b[1;1R")).await.unwrap();
+                    }
+                    out.push_str(&chunk);
+                    if out.contains(needle) {
+                        return;
+                    }
+                }
+                Some(ShellFrame::Exit { code }) => panic!("shell exited ({code:?}) before {needle:?}; output: {out}"),
+                Some(_) => {}
+                None => panic!("stream closed before {needle:?}; output: {out}"),
+            }
+        }
+    })
+    .await;
+    assert!(res.is_ok(), "timed out waiting for {needle:?}; output so far: {out}");
+    out
+}

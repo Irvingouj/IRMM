@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-pub use channels::{DesktopProvider, NoDesktop};
+pub use channels::{AsyncStream, DesktopProvider, InProcessDesktop, NoDesktop};
 pub use state::AgentStateFile;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -171,7 +171,7 @@ async fn session(
 ) -> Result<(), SessionEnd> {
     let conn: Connection = endpoint.connect(server_addr(file)?, irmm_proto::AGENT_ALPN).await?;
     let (mut send, mut recv) = conn.open_bi().await?;
-    let info = inventory::collect(&config.version);
+    let info = inventory::collect(&config.version, config.desktop.monitors());
     let hello = match (file.device_id, &config.enroll_token) {
         (None, Some(token)) => AgentMsg::Enroll { token: token.clone(), info },
         (None, None) => return Err(SessionEnd::Rejected("not enrolled and no enrollment token".into())),
@@ -206,13 +206,14 @@ async fn session(
         anyhow::Ok(())
     });
     let hb_tx = out_tx.clone();
-    let (hb_every, version) = (config.heartbeat, config.version.clone());
+    let (hb_every, version, desktop) = (config.heartbeat, config.version.clone(), config.desktop.clone());
     tasks.spawn(async move {
         loop {
             tokio::time::sleep(hb_every).await;
             let info = tokio::task::spawn_blocking({
                 let v = version.clone();
-                move || inventory::collect(&v)
+                let monitors = desktop.monitors();
+                move || inventory::collect(&v, monitors)
             })
             .await?;
             if hb_tx.send(AgentMsg::Heartbeat { info }).is_err() {

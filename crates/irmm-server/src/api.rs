@@ -300,6 +300,8 @@ async fn get_device(State(st): State<crate::State>, user: AuthUser, UrlPath(id):
 #[derive(Deserialize)]
 struct SessionReq {
     kind: ChannelKind,
+    #[serde(default)]
+    monitor: u32,
 }
 
 /// Issues a short-lived, single-use ticket for one channel to the device.
@@ -329,11 +331,11 @@ async fn create_session(
     Ok(Json(json!({
         "session_id": session_id,
         "kind": req.kind,
-        "ticket": issue_ticket(&st, &user, device, session_id, req.kind),
+        "ticket": issue_ticket(&st, &user, device, session_id, req.kind, req.monitor),
     })))
 }
 
-pub fn issue_ticket(st: &crate::AppState, user: &AuthUser, device: Uuid, session_id: Uuid, kind: ChannelKind) -> String {
+pub fn issue_ticket(st: &crate::AppState, user: &AuthUser, device: Uuid, session_id: Uuid, kind: ChannelKind, monitor: u32) -> String {
     irmm_proto::sign_ticket(
         &st.secret_key,
         &TicketClaims {
@@ -343,6 +345,7 @@ pub fn issue_ticket(st: &crate::AppState, user: &AuthUser, device: Uuid, session
             device_id: device,
             user_id: user.user_id,
             kind,
+            monitor,
             exp: irmm_proto::now_secs() + 120,
         },
     )

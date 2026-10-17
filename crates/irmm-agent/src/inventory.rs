@@ -1,7 +1,7 @@
 use irmm_proto::{DeviceInfo, DiskInfo};
 use sysinfo::{Disks, Networks, System};
 
-pub fn collect(agent_version: &str) -> DeviceInfo {
+pub fn collect(agent_version: &str, monitors: Vec<irmm_proto::MonitorInfo>) -> DeviceInfo {
     let mut sys = System::new();
     sys.refresh_memory();
     sys.refresh_cpu_all();
@@ -36,6 +36,7 @@ pub fn collect(agent_version: &str) -> DeviceInfo {
         disks,
         ips,
         logged_in_users: logged_in_users(),
+        monitors,
     }
 }
 

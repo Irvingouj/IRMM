@@ -1,5 +1,7 @@
 //! Test kit: real Postgres, real server, real agents, talking over real sockets.
 
+pub mod rdp;
+
 use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -362,4 +364,19 @@ pub async fn gateway_channel(env: &TestEnv, user: &Api, device: uuid::Uuid, kind
 
 pub fn gateway_url(env: &TestEnv, device: uuid::Uuid, ticket: &str) -> String {
     format!("ws://{}/api/gw/{device}?ticket={ticket}", env.server.http_addr)
+}
+
+/// Enrolls an agent whose desktop is the given fake.
+pub async fn enrolled_agent_with_desktop(
+    env: &TestEnv,
+    admin: &Api,
+    desktop: rdp::FakeDesktop,
+) -> (AgentHandle, uuid::Uuid, tempdir::Dir) {
+    let (_, _, tok) = make_site(admin, "Client", "Site").await;
+    let dir = tempdir::Dir::new();
+    let mut cfg = env.agent_config(dir.to_path_buf(), tok["token"].as_str());
+    cfg.desktop = std::sync::Arc::new(irmm_agent::InProcessDesktop(std::sync::Arc::new(desktop)));
+    let agent = irmm_agent::start(cfg).await.expect("start agent");
+    let id = wait_agent_online(&agent).await;
+    (agent, id, dir)
 }

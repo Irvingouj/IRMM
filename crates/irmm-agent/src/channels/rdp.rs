@@ -11,14 +11,14 @@ use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use super::{BoxRead, BoxWrite};
 use crate::Ctx;
 
-pub async fn serve(ctx: Ctx, mut r: BoxRead, mut w: BoxWrite) -> anyhow::Result<()> {
+pub async fn serve(ctx: Ctx, monitor: u32, mut r: BoxRead, mut w: BoxWrite) -> anyhow::Result<()> {
     let req = read_cleanpath(&mut r).await?;
     let x224_req = match req.into_enum().map_err(|e| anyhow::anyhow!("{e:?}"))? {
         RDCleanPath::Request { x224_connection_request, .. } => x224_connection_request,
         _ => bail!("expected RDCleanPath request"),
     };
 
-    let mut server = match ctx.desktop.connect().await {
+    let mut server = match ctx.desktop.connect(monitor).await {
         Ok(s) => s,
         Err(e) => {
             send_pdu(&mut w, &RDCleanPathPdu::new_http_error(503)).await?;

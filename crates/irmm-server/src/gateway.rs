@@ -111,7 +111,7 @@ async fn files_channel(
     };
     audit(&mut tx, user.tenant_id, user.actor(), action, Some(device.to_string()), json!({"request": req})).await?;
     tx.commit().await?;
-    let ticket = issue_ticket(st, user, device, Uuid::new_v4(), ChannelKind::Files);
+    let ticket = issue_ticket(st, user, device, Uuid::new_v4(), ChannelKind::Files, 0);
     let (mut send, recv) = st
         .agents
         .open_channel(device, &ticket)

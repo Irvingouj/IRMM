@@ -62,6 +62,17 @@ pub struct DeviceInfo {
     pub disks: Vec<DiskInfo>,
     pub ips: Vec<String>,
     pub logged_in_users: Vec<String>,
+    #[serde(default)]
+    pub monitors: Vec<MonitorInfo>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct MonitorInfo {
+    pub index: u32,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub primary: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -168,6 +179,9 @@ pub struct TicketClaims {
     pub device_id: Uuid,
     pub user_id: Uuid,
     pub kind: ChannelKind,
+    /// Monitor to show for `Rdp` channels.
+    #[serde(default)]
+    pub monitor: u32,
     /// Unix seconds.
     pub exp: u64,
 }

@@ -27,3 +27,4 @@ iroh = "1.3"
 irmm-proto = { path = "crates/irmm-proto" }
 irmm-server = { path = "crates/irmm-server" }
 irmm-agent = { path = "crates/irmm-agent" }
+irmm-desktop = { path = "crates/irmm-desktop" }

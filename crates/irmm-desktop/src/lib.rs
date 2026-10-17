@@ -2,7 +2,10 @@
 //! session over any byte stream (TLS security, no CredSSP — authorization happens
 //! before the stream reaches us).
 
+pub mod clipboard;
 pub mod platform;
+
+pub use clipboard::Clipboard;
 
 use std::num::{NonZeroU16, NonZeroUsize};
 use std::sync::Arc;
@@ -72,7 +75,14 @@ pub struct MonitorInfo {
 /// A machine's desktop: enumerates monitors and opens a capture + input pair.
 pub trait Desktop: Send + Sync {
     fn monitors(&self) -> Vec<MonitorInfo>;
-    fn open(&self, monitor: u32) -> anyhow::Result<(Box<dyn ScreenSource>, Box<dyn InputSink>)>;
+    fn open(&self, monitor: u32) -> anyhow::Result<Session>;
+}
+
+/// Everything one RDP session needs from the local machine.
+pub struct Session {
+    pub screen: Box<dyn ScreenSource>,
+    pub input: Box<dyn InputSink>,
+    pub clipboard: Option<Box<dyn Clipboard>>,
 }
 
 /// Self-signed TLS identity for the RDP server.
@@ -87,7 +97,7 @@ pub fn tls_acceptor() -> anyhow::Result<tokio_rustls::TlsAcceptor> {
 }
 
 /// Runs [`serve`] on its own thread: the ironrdp-server session future is not `Send`.
-pub fn spawn<S>(stream: S, source: Box<dyn ScreenSource>, input: Box<dyn InputSink>) -> std::thread::JoinHandle<anyhow::Result<()>>
+pub fn spawn<S>(stream: S, session: Session) -> std::thread::JoinHandle<anyhow::Result<()>>
 where
     S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static,
 {
@@ -95,7 +105,7 @@ where
         .name("irmm-rdp".into())
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-            let res = rt.block_on(serve(stream, source, input));
+            let res = rt.block_on(serve(stream, session));
             if let Err(e) = &res {
                 tracing::debug!(error = %format!("{e:#}"), "rdp host ended");
             }
@@ -105,17 +115,25 @@ where
 }
 
 /// Serves one RDP connection over `stream` until the client disconnects.
-pub async fn serve<S>(stream: S, source: Box<dyn ScreenSource>, input: Box<dyn InputSink>) -> anyhow::Result<()>
+pub async fn serve<S>(stream: S, session: Session) -> anyhow::Result<()>
 where
     S: AsyncRead + AsyncWrite + Send + Sync + Unpin,
 {
+    let Session { screen, input, clipboard } = session;
+    let clipboard = clipboard.map(clipboard::Factory::new);
+    let watcher = clipboard.as_ref().map(|c| tokio::spawn(c.watch()));
     let mut server = RdpServer::builder()
         .with_addr(([127, 0, 0, 1], 0))
         .with_tls(tls_acceptor()?)
         .with_input_handler(Input::new(input))
-        .with_display_handler(Display { source: Some(source) })
+        .with_display_handler(Display { source: Some(screen) })
+        .with_cliprdr_factory(clipboard.map(|c| Box::new(c) as Box<dyn ironrdp_server::CliprdrServerFactory>))
         .build();
-    server.run_connection(stream).await.context("rdp session")
+    let res = server.run_connection(stream).await.context("rdp session");
+    if let Some(w) = watcher {
+        w.abort();
+    }
+    res
 }
 
 struct Display {

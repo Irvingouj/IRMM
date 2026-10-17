@@ -89,3 +89,21 @@ async fn desktop_unavailable_is_reported() {
     let err = rdp_session(&env, &admin, dev, 0).await.err().expect("no desktop → error");
     assert!(format!("{err:#}").contains("RDCleanPath"), "{err:#}");
 }
+
+#[tokio::test]
+async fn text_clipboard_syncs_both_ways() {
+    let env = TestEnv::start().await;
+    let admin = env.signup("MSP", "o@m.test").await;
+    let desktop = FakeDesktop::default();
+    let (_agent, dev, _dir) = enrolled_agent_with_desktop(&env, &admin, desktop.clone()).await;
+    let mut rdp = rdp_session(&env, &admin, dev, 0).await.expect("rdp connect");
+
+    desktop.set_clipboard("copied on the managed machine ✓");
+    rdp.pump_until("remote clipboard", |c| c.remote_clipboard().as_deref() == Some("copied on the managed machine ✓"))
+        .await
+        .unwrap();
+
+    rdp.copy_text("pasted from the browser");
+    let d = desktop.clone();
+    rdp.pump_until("local clipboard", move |_| d.clipboard().as_deref() == Some("pasted from the browser")).await.unwrap();
+}

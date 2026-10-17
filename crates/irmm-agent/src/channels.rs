@@ -56,9 +56,9 @@ impl DesktopProvider for InProcessDesktop {
     }
 
     async fn connect(&self, monitor: u32) -> anyhow::Result<Box<dyn AsyncStream>> {
-        let (source, input) = self.0.open(monitor)?;
+        let session = self.0.open(monitor)?;
         let (ours, theirs) = tokio::io::duplex(1 << 20);
-        irmm_desktop::spawn(theirs, source, input);
+        irmm_desktop::spawn(theirs, session);
         Ok(Box::new(ours))
     }
 }

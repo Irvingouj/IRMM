@@ -17,7 +17,14 @@ use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageOutput};
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
-use irmm_desktop::{Desktop, Frame, InputEvent, InputSink, MonitorInfo, ScreenSource};
+use ironrdp::cliprdr::backend::{ClipboardMessage, CliprdrBackend};
+use ironrdp::cliprdr::pdu::{
+    ClipboardFormat, ClipboardFormatId, ClipboardGeneralCapabilityFlags, FileContentsRequest, FileContentsResponse,
+    FormatDataRequest, FormatDataResponse, LockDataId, OwnedFormatDataResponse,
+};
+use ironrdp::cliprdr::CliprdrClient;
+use irmm_desktop::{Clipboard, Desktop, Frame, InputEvent, InputSink, MonitorInfo, ScreenSource, Session};
+use tokio::sync::mpsc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 /// Two fake monitors (640x480 primary, 320x240) filled with a settable color.
@@ -25,6 +32,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 pub struct FakeDesktop {
     color: Arc<Mutex<[u8; 4]>>,
     events: Arc<Mutex<Vec<InputEvent>>>,
+    clipboard: Arc<Mutex<Option<String>>>,
 }
 
 impl FakeDesktop {
@@ -35,6 +43,26 @@ impl FakeDesktop {
 
     pub fn events(&self) -> Vec<InputEvent> {
         self.events.lock().unwrap().clone()
+    }
+
+    pub fn set_clipboard(&self, text: &str) {
+        *self.clipboard.lock().unwrap() = Some(text.to_owned());
+    }
+
+    pub fn clipboard(&self) -> Option<String> {
+        self.clipboard.lock().unwrap().clone()
+    }
+}
+
+struct FakeClipboard(Arc<Mutex<Option<String>>>);
+
+impl Clipboard for FakeClipboard {
+    fn get_text(&mut self) -> Option<String> {
+        self.0.lock().unwrap().clone()
+    }
+
+    fn set_text(&mut self, text: &str) {
+        *self.0.lock().unwrap() = Some(text.to_owned());
     }
 }
 
@@ -49,12 +77,13 @@ impl Desktop for FakeDesktop {
             .collect()
     }
 
-    fn open(&self, monitor: u32) -> anyhow::Result<(Box<dyn ScreenSource>, Box<dyn InputSink>)> {
+    fn open(&self, monitor: u32) -> anyhow::Result<Session> {
         let (w, h) = *MONITORS.get(monitor as usize).context("no such monitor")?;
-        Ok((
-            Box::new(FakeScreen { w: w as u16, h: h as u16, color: self.color.clone() }),
-            Box::new(FakeInput(self.events.clone())),
-        ))
+        Ok(Session {
+            screen: Box::new(FakeScreen { w: w as u16, h: h as u16, color: self.color.clone() }),
+            input: Box::new(FakeInput(self.events.clone())),
+            clipboard: Some(Box::new(FakeClipboard(self.clipboard.clone()))),
+        })
     }
 }
 
@@ -91,6 +120,73 @@ pub struct RdpClient<S> {
     stage: ActiveStage,
     pub image: DecodedImage,
     input: Database,
+    clip_rx: mpsc::UnboundedReceiver<ClipboardMessage>,
+    clip_tx: mpsc::UnboundedSender<ClipboardMessage>,
+    clip: Arc<Mutex<ClipState>>,
+    clip_pending: Vec<ClipboardMessage>,
+}
+
+#[derive(Default)]
+struct ClipState {
+    local: Option<String>,
+    remote: Option<String>,
+}
+
+/// Client-side clipboard backend, like the browser's.
+#[derive(Debug)]
+struct ClientClip {
+    tx: mpsc::UnboundedSender<ClipboardMessage>,
+    #[allow(dead_code)]
+    state: Arc<Mutex<ClipState>>,
+}
+
+impl core::fmt::Debug for ClipState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("ClipState")
+    }
+}
+
+ironrdp::core::impl_as_any!(ClientClip);
+
+impl CliprdrBackend for ClientClip {
+    fn temporary_directory(&self) -> &str {
+        ".cliprdr"
+    }
+    fn client_capabilities(&self) -> ClipboardGeneralCapabilityFlags {
+        ClipboardGeneralCapabilityFlags::empty()
+    }
+    fn on_ready(&mut self) {}
+    fn on_request_format_list(&mut self) {
+        // Always answer: the initial format list completes CLIPRDR initialization.
+        let formats = if self.state.lock().unwrap().local.is_some() {
+            vec![ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)]
+        } else {
+            vec![]
+        };
+        let _ = self.tx.send(ClipboardMessage::SendInitiateCopy(formats));
+    }
+    fn on_process_negotiated_capabilities(&mut self, _: ClipboardGeneralCapabilityFlags) {}
+    fn on_remote_copy(&mut self, formats: &[ClipboardFormat]) {
+        if formats.iter().any(|f| f.id() == ClipboardFormatId::CF_UNICODETEXT) {
+            let _ = self.tx.send(ClipboardMessage::SendInitiatePaste(ClipboardFormatId::CF_UNICODETEXT));
+        }
+    }
+    fn on_format_data_request(&mut self, _: FormatDataRequest) {
+        let rsp = match self.state.lock().unwrap().local.clone() {
+            Some(t) => OwnedFormatDataResponse::new_unicode_string(&t),
+            None => OwnedFormatDataResponse::new_error(),
+        };
+        let _ = self.tx.send(ClipboardMessage::SendFormatData(rsp));
+    }
+    fn on_format_data_response(&mut self, rsp: FormatDataResponse<'_>) {
+        if !rsp.is_error() {
+            self.state.lock().unwrap().remote = rsp.to_unicode_string().ok();
+        }
+    }
+    fn on_file_contents_request(&mut self, _: FileContentsRequest) {}
+    fn on_file_contents_response(&mut self, _: FileContentsResponse<'_>) {}
+    fn on_lock(&mut self, _: LockDataId) {}
+    fn on_unlock(&mut self, _: LockDataId) {}
 }
 
 fn client_config() -> connector::Config {
@@ -149,6 +245,9 @@ where
     pub async fn connect(stream: S, destination: &str, proxy_auth: &str) -> anyhow::Result<Self> {
         let mut framed = TokioFramed::new(stream);
         let mut connector = ClientConnector::new(client_config(), "127.0.0.1:33899".parse().unwrap());
+        let (clip_tx, clip_rx) = mpsc::unbounded_channel();
+        let clip = Arc::new(Mutex::new(ClipState::default()));
+        connector.attach_static_channel(CliprdrClient::new(Box::new(ClientClip { tx: clip_tx.clone(), state: clip.clone() })));
         let mut buf = WriteBuf::new();
         let ClientConnectorState::ConnectionInitiationSendRequest = connector.state else { bail!("connector state") };
         connector.step_no_input(&mut buf)?;
@@ -200,7 +299,7 @@ where
             pointer_software_rendering: result.pointer_software_rendering,
         }
         .build();
-        Ok(Self { framed, stage, image, input: Database::new() })
+        Ok(Self { framed, stage, image, input: Database::new(), clip_rx, clip_tx, clip, clip_pending: Vec::new() })
     }
 
     pub fn size(&self) -> (u16, u16) {
@@ -213,13 +312,62 @@ where
         self.image.data()[i..i + 4].try_into().unwrap()
     }
 
+    /// Puts text on the client clipboard and announces it (like a browser copy).
+    pub fn copy_text(&mut self, text: &str) {
+        self.clip.lock().unwrap().local = Some(text.to_owned());
+        let _ = self.clip_tx.send(ClipboardMessage::SendInitiateCopy(vec![ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)]));
+    }
+
+    /// Last text received from the remote clipboard.
+    pub fn remote_clipboard(&self) -> Option<String> {
+        self.clip.lock().unwrap().remote.clone()
+    }
+
+    /// Sends queued clipboard messages; ones issued before CLIPRDR is ready are retried.
+    async fn flush_clipboard(&mut self) -> anyhow::Result<()> {
+        while let Ok(msg) = self.clip_rx.try_recv() {
+            self.clip_pending.push(msg);
+        }
+        let mut retry = Vec::new();
+        for msg in std::mem::take(&mut self.clip_pending) {
+            let Some(cliprdr) = self.stage.get_svc_processor_mut::<CliprdrClient>() else { continue };
+            let msgs = match &msg {
+                ClipboardMessage::SendInitiateCopy(f) => cliprdr.initiate_copy(f),
+                ClipboardMessage::SendInitiatePaste(f) => cliprdr.initiate_paste(*f),
+                ClipboardMessage::SendFormatData(_) => {
+                    let ClipboardMessage::SendFormatData(d) = msg else { unreachable!() };
+                    let msgs = cliprdr.submit_format_data(d)?;
+                    let frame = self.stage.process_svc_processor_messages(msgs)?;
+                    self.framed.write_all(&frame).await?;
+                    continue;
+                }
+                _ => continue,
+            };
+            match msgs {
+                Ok(msgs) => {
+                    let frame = self.stage.process_svc_processor_messages(msgs)?;
+                    self.framed.write_all(&frame).await?;
+                }
+                Err(_) => retry.push(msg),
+            }
+        }
+        self.clip_pending = retry;
+        Ok(())
+    }
+
     /// Processes server PDUs until `pred` holds.
     pub async fn pump_until(&mut self, what: &str, mut pred: impl FnMut(&Self) -> bool) -> anyhow::Result<()> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-        while !pred(self) {
-            let (action, payload) = tokio::time::timeout_at(deadline, self.framed.read_pdu())
-                .await
-                .with_context(|| format!("timed out waiting for {what}"))??;
+        loop {
+            self.flush_clipboard().await?;
+            if pred(self) {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() > deadline {
+                bail!("timed out waiting for {what}");
+            }
+            let Ok(res) = tokio::time::timeout(Duration::from_millis(100), self.framed.read_pdu()).await else { continue };
+            let (action, payload) = res?;
             for out in self.stage.process(&mut self.image, action, &payload)? {
                 match out {
                     ActiveStageOutput::ResponseFrame(f) => self.framed.write_all(&f).await?,
@@ -228,7 +376,6 @@ where
                 }
             }
         }
-        Ok(())
     }
 
     pub async fn send(&mut self, ops: impl IntoIterator<Item = Operation>) -> anyhow::Result<()> {

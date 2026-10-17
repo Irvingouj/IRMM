@@ -13,3 +13,5 @@ ironrdp-server = { version = "0.13", default-features = false, features = ["help
 rcgen = "0.14"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+ironrdp-cliprdr = "0.7"
+ironrdp-core = "0.2"

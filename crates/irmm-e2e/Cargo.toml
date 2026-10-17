@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[lib]
+doctest = false
+
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true

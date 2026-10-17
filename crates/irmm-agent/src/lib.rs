@@ -2,6 +2,7 @@
 //! channels (remote desktop, shell, files) arriving via Iroh or WebRTC.
 
 mod channels;
+pub mod install;
 mod inventory;
 mod scripts;
 mod state;
@@ -87,9 +88,20 @@ impl AgentHandle {
         self.endpoint.close().await;
     }
 
-    /// Runs until the agent stops (rejected or aborted).
-    pub async fn wait(self) {
+    /// Runs until the agent stops (rejected or aborted) and returns its final state.
+    pub async fn wait(self) -> AgentState {
         let _ = self.task.await;
+        self.state.borrow().clone()
+    }
+
+    /// Waits until the agent is online or rejected.
+    pub async fn settled(&mut self) -> AgentState {
+        let s = self
+            .state
+            .wait_for(|s| !matches!(s, AgentState::Connecting))
+            .await
+            .map(|s| s.clone());
+        s.unwrap_or(AgentState::Connecting)
     }
 }
 
@@ -101,6 +113,7 @@ pub async fn start(config: Config) -> anyhow::Result<AgentHandle> {
     };
     let endpoint = Endpoint::builder(presets::Minimal)
         .secret_key(file.secret_key()?)
+        .transport_config(irmm_proto::quic_transport())
         .relay_mode(relay_mode)
         .bind()
         .await

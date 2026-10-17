@@ -390,3 +390,21 @@ pub async fn enrolled_agent_with_desktop(
     let id = wait_agent_online(&agent).await;
     (agent, id, dir)
 }
+
+/// Path to the real `irmm-agent` executable, built on first use.
+pub fn agent_binary() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let status = std::process::Command::new(env!("CARGO"))
+                .args(["build", "-q", "-p", "irmm-agent", "--bin", "irmm-agent"])
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .status()
+                .expect("run cargo build");
+            assert!(status.success(), "building irmm-agent failed");
+            // target/<profile>/deps/<test> -> target/<profile>/irmm-agent
+            let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+            profile_dir.join(format!("irmm-agent{}", std::env::consts::EXE_SUFFIX))
+        })
+        .clone()
+}

@@ -291,3 +291,12 @@ pub struct Bootstrap {
     #[serde(default)]
     pub ice_servers: Vec<String>,
 }
+
+/// QUIC settings shared by agent and server: keep-alives plus a short idle timeout,
+/// so a vanished peer (crash, power loss, network cut) is noticed within seconds.
+pub fn quic_transport() -> iroh::endpoint::QuicTransportConfig {
+    iroh::endpoint::QuicTransportConfig::builder()
+        .keep_alive_interval(std::time::Duration::from_secs(4))
+        .max_idle_timeout(Some(std::time::Duration::from_secs(15).try_into().expect("valid idle timeout")))
+        .build()
+}

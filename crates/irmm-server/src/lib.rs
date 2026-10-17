@@ -90,6 +90,7 @@ pub async fn start(config: Config) -> anyhow::Result<ServerHandle> {
     let endpoint = Endpoint::builder(presets::Minimal)
         .secret_key(config.secret_key.clone())
         .alpns(vec![irmm_proto::AGENT_ALPN.to_vec()])
+        .transport_config(irmm_proto::quic_transport())
         .relay_mode(relay_mode)
         .bind_addr(config.iroh_addr)?
         .bind()

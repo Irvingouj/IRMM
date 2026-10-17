@@ -29,6 +29,8 @@ pub struct Agents {
     links: Arc<Mutex<HashMap<Uuid, AgentLink>>>,
     pending_rtc: Arc<Mutex<HashMap<Uuid, oneshot::Sender<Result<String, String>>>>>,
     used_jti: Arc<Mutex<HashMap<Uuid, u64>>>,
+    /// Endpoints that bootstrapped with a valid enrollment token, with expiry (unix secs).
+    relay_grants: Arc<Mutex<HashMap<String, u64>>>,
     next_id: Arc<AtomicU64>,
 }
 
@@ -43,6 +45,18 @@ impl Agents {
         let now = irmm_proto::now_secs();
         used.retain(|_, e| *e >= now);
         used.insert(jti, exp).is_none()
+    }
+
+    /// Lets an enrolling agent use the relay before it has a device row.
+    pub fn grant_relay(&self, node: String) {
+        let mut g = self.relay_grants.lock().unwrap();
+        let now = irmm_proto::now_secs();
+        g.retain(|_, e| *e >= now);
+        g.insert(node, now + 3600);
+    }
+
+    pub fn relay_granted(&self, node: &str) -> bool {
+        self.relay_grants.lock().unwrap().get(node).is_some_and(|e| *e >= irmm_proto::now_secs())
     }
 
     pub fn get(&self, device: Uuid) -> Option<AgentLink> {

@@ -84,6 +84,11 @@ pub mod tempdir {
 
 impl TestEnv {
     pub async fn start() -> Self {
+        Self::start_with_console(None).await
+    }
+
+    /// Serves the built web console from `static_dir` as well.
+    pub async fn start_with_console(static_dir: Option<PathBuf>) -> Self {
         init_tracing();
         let db_url = fresh_database().await;
         let release_key = iroh::SecretKey::generate();
@@ -98,9 +103,10 @@ impl TestEnv {
             relay_url: None,
             release_key: release_key.public(),
             data_dir: files.to_path_buf(),
-            static_dir: None,
+            static_dir,
             ice_servers: vec![],
             operator_token: Some(OPERATOR_TOKEN.into()),
+            relay_access_token: Some(RELAY_ACCESS_TOKEN.into()),
         })
         .await
         .expect("start server");
@@ -149,6 +155,8 @@ impl TestEnv {
 }
 
 pub const OPERATOR_TOKEN: &str = "test-operator-token";
+
+pub const RELAY_ACCESS_TOKEN: &str = "test-relay-token";
 
 pub const PASSWORD: &str = "correct horse battery staple";
 
@@ -396,10 +404,19 @@ pub async fn enrolled_agent_with_desktop(
     admin: &Api,
     desktop: rdp::FakeDesktop,
 ) -> (AgentHandle, uuid::Uuid, tempdir::Dir) {
+    enrolled_agent_with(env, admin, std::sync::Arc::new(desktop)).await
+}
+
+/// Enrolls an agent whose remote desktop is `desktop`, hosted in-process.
+pub async fn enrolled_agent_with(
+    env: &TestEnv,
+    admin: &Api,
+    desktop: std::sync::Arc<dyn irmm_desktop::Desktop>,
+) -> (AgentHandle, uuid::Uuid, tempdir::Dir) {
     let (_, _, tok) = make_site(admin, "Client", "Site").await;
     let dir = tempdir::Dir::new();
     let mut cfg = env.agent_config(dir.to_path_buf(), tok["token"].as_str());
-    cfg.desktop = std::sync::Arc::new(irmm_agent::InProcessDesktop(std::sync::Arc::new(desktop)));
+    cfg.desktop = std::sync::Arc::new(irmm_agent::InProcessDesktop(desktop));
     let agent = irmm_agent::start(cfg).await.expect("start agent");
     let id = wait_agent_online(&agent).await;
     (agent, id, dir)

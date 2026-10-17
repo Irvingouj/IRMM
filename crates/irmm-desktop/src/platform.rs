@@ -1,7 +1,9 @@
 //! Native desktops per OS.
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod unix;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "linux")]
+mod x11;
 #[cfg(windows)]
 pub mod windows;
 
@@ -11,9 +13,13 @@ use crate::Desktop;
 
 /// The desktop of the session this process runs in.
 pub fn native() -> Option<Arc<dyn Desktop>> {
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     {
-        Some(Arc::new(unix::XcapDesktop))
+        Some(Arc::new(macos::XcapDesktop))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Some(Arc::new(x11::X11Desktop))
     }
     #[cfg(windows)]
     {

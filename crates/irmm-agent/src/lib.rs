@@ -106,7 +106,7 @@ impl AgentHandle {
 }
 
 pub async fn start(config: Config) -> anyhow::Result<AgentHandle> {
-    let mut file = AgentStateFile::load_or_bootstrap(&config.state_dir, &config.server_url).await?;
+    let mut file = AgentStateFile::load_or_bootstrap(&config.state_dir, &config.server_url, config.enroll_token.as_deref()).await?;
     let relay_mode = match &file.relay_url {
         Some(url) => RelayMode::Custom(iroh::RelayMap::from(url.parse::<iroh::RelayUrl>()?)),
         None => RelayMode::Disabled,

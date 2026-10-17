@@ -13,6 +13,7 @@
 //! | `IRMM_RELAY_URL` | unset | self-hosted iroh-relay |
 //! | `IRMM_ICE_SERVERS` | `stun:stun.l.google.com:19302` | comma-separated STUN/TURN URLs |
 //! | `IRMM_OPERATOR_TOKEN` | unset | enables release publishing |
+//! | `IRMM_RELAY_ACCESS_TOKEN` | unset | enables `/api/relay/access` for iroh-relay |
 
 use std::path::{Path, PathBuf};
 
@@ -64,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         static_dir: var("IRMM_STATIC_DIR").filter(|v| !v.is_empty()).map(PathBuf::from),
         ice_servers: list(var("IRMM_ICE_SERVERS").unwrap_or_else(|| "stun:stun.l.google.com:19302".into())),
         operator_token: var("IRMM_OPERATOR_TOKEN").filter(|v| !v.is_empty()),
+        relay_access_token: var("IRMM_RELAY_ACCESS_TOKEN").filter(|v| !v.is_empty()),
         data_dir,
     };
     let server = irmm_server::start(config).await?;

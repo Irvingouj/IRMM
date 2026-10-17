@@ -36,15 +36,18 @@ impl AgentStateFile {
     }
 
     /// Loads the saved identity, or fetches the server bootstrap and creates one.
-    pub async fn load_or_bootstrap(dir: &Path, server_url: &str) -> anyhow::Result<Self> {
+    /// With an enrollment token, the server also lets this new identity use the relay.
+    pub async fn load_or_bootstrap(dir: &Path, server_url: &str, enroll_token: Option<&str>) -> anyhow::Result<Self> {
         if let Some(s) = Self::load(dir)? {
             return Ok(s);
         }
         anyhow::ensure!(!server_url.is_empty(), "no saved state and no server URL");
-        let b = fetch_bootstrap(server_url).await?;
+        let key = iroh::SecretKey::generate();
+        let grant = enroll_token.map(|t| (key.public().to_string(), t));
+        let b = fetch_bootstrap(server_url, grant).await?;
         let s = Self {
             server_url: server_url.trim_end_matches('/').to_owned(),
-            secret_key: hex::encode(iroh::SecretKey::generate().to_bytes()),
+            secret_key: hex::encode(key.to_bytes()),
             server_id: b.server_id,
             direct_addrs: b.direct_addrs,
             relay_url: b.relay_url,
@@ -59,7 +62,7 @@ impl AgentStateFile {
     /// Re-reads the server's addresses from its bootstrap endpoint. The server and
     /// release keys pinned at enrollment must not change.
     pub async fn refresh_addrs(&mut self, dir: &Path, server_url: &str) -> anyhow::Result<()> {
-        let b = fetch_bootstrap(server_url).await?;
+        let b = fetch_bootstrap(server_url, None).await?;
         anyhow::ensure!(b.server_id == self.server_id && b.release_key == self.release_key, "server identity changed");
         if (&b.direct_addrs, &b.relay_url, &b.ice_servers) != (&self.direct_addrs, &self.relay_url, &self.ice_servers) {
             self.direct_addrs = b.direct_addrs;
@@ -92,7 +95,11 @@ fn restrict_permissions(_p: &Path) {
     // The state directory under %ProgramData% is ACL'd to SYSTEM/Administrators by the installer.
 }
 
-async fn fetch_bootstrap(server_url: &str) -> anyhow::Result<irmm_proto::Bootstrap> {
+async fn fetch_bootstrap(server_url: &str, relay_grant: Option<(String, &str)>) -> anyhow::Result<irmm_proto::Bootstrap> {
     let url = format!("{}/api/agent/bootstrap", server_url.trim_end_matches('/'));
-    reqwest::get(&url).await?.error_for_status()?.json().await.context("bootstrap")
+    let mut req = reqwest::Client::new().get(&url);
+    if let Some((node, token)) = relay_grant {
+        req = req.query(&[("node", node.as_str()), ("token", token)]);
+    }
+    req.send().await?.error_for_status()?.json().await.context("bootstrap")
 }

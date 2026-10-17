@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use axum::extract::{Path as UrlPath, State};
+use axum::extract::{Path as UrlPath, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use irmm_proto::{ChannelKind, TicketClaims};
@@ -32,6 +32,7 @@ pub fn router(st: crate::State, static_dir: Option<&Path>) -> Router {
         .merge(crate::gateway::routes())
         .merge(crate::releases::routes())
         .merge(crate::install::routes())
+        .merge(crate::relay::routes())
         .with_state(st);
     match static_dir {
         Some(dir) => api.fallback_service(
@@ -42,14 +43,27 @@ pub fn router(st: crate::State, static_dir: Option<&Path>) -> Router {
     }
 }
 
-async fn bootstrap(State(st): State<crate::State>) -> Json<irmm_proto::Bootstrap> {
-    Json(irmm_proto::Bootstrap {
+#[derive(serde::Deserialize)]
+struct BootstrapQuery {
+    node: Option<String>,
+    token: Option<String>,
+}
+
+/// Public server parameters for a new agent. An agent that presents a usable
+/// enrollment token may use the relay while it enrolls.
+async fn bootstrap(State(st): State<crate::State>, Query(q): Query<BootstrapQuery>) -> ApiResult<Json<irmm_proto::Bootstrap>> {
+    if let (Some(node), Some(token)) = (q.node, q.token) {
+        if node.parse::<iroh::PublicKey>().is_ok() && crate::relay::enroll_token_usable(&st, &token).await? {
+            st.agents.grant_relay(node);
+        }
+    }
+    Ok(Json(irmm_proto::Bootstrap {
         server_id: st.endpoint.id().to_string(),
         direct_addrs: st.iroh_public_addrs.clone(),
         relay_url: st.relay_url.clone(),
         release_key: st.release_key.to_string(),
         ice_servers: st.ice_servers.clone(),
-    })
+    }))
 }
 
 async fn list_users(State(st): State<crate::State>, user: AuthUser) -> ApiResult<Json<Value>> {

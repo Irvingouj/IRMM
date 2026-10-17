@@ -1,4 +1,4 @@
-//! macOS and Linux (X11): xcap capture, enigo input, arboard clipboard.
+//! macOS: xcap capture, enigo input, arboard clipboard.
 
 use std::time::{Duration, Instant};
 
@@ -141,39 +141,7 @@ fn notches(delta: i16) -> i32 {
     if n == 0 { delta.signum() as i32 } else { n }
 }
 
-/// Set-1 scan code → X11 keycode (evdev + 8).
-#[cfg(target_os = "linux")]
-fn keycode(code: u8, extended: bool) -> Option<u16> {
-    let evdev: u16 = if !extended {
-        code as u16
-    } else {
-        match code {
-            0x1C => 96,  // KP Enter
-            0x1D => 97,  // Right Ctrl
-            0x35 => 98,  // KP /
-            0x37 => 99,  // Print Screen
-            0x38 => 100, // Right Alt
-            0x47 => 102, // Home
-            0x48 => 103, // Up
-            0x49 => 104, // Page Up
-            0x4B => 105, // Left
-            0x4D => 106, // Right
-            0x4F => 107, // End
-            0x50 => 108, // Down
-            0x51 => 109, // Page Down
-            0x52 => 110, // Insert
-            0x53 => 111, // Delete
-            0x5B => 125, // Left Meta
-            0x5C => 126, // Right Meta
-            0x5D => 127, // Menu
-            _ => return None,
-        }
-    };
-    Some(evdev + 8)
-}
-
 /// Set-1 scan code → macOS virtual key code (US physical layout).
-#[cfg(target_os = "macos")]
 fn keycode(code: u8, extended: bool) -> Option<u16> {
     if extended {
         return Some(match code {

@@ -2865,6 +2865,7 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "windows 0.62.2",
+ "x11rb",
  "xcap",
 ]
 
@@ -2874,6 +2875,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "bytes",
  "futures",
  "hex",
@@ -2896,6 +2898,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "webrtc",
+ "x11rb",
  "x509-cert",
 ]
 

@@ -8,6 +8,7 @@ mod error;
 mod gateway;
 mod install;
 mod jobs;
+mod relay;
 mod releases;
 
 use std::net::SocketAddr;
@@ -45,6 +46,8 @@ pub struct Config {
     pub ice_servers: Vec<String>,
     /// Bearer token for operator endpoints (release publishing). `None` disables them.
     pub operator_token: Option<String>,
+    /// Bearer token the iroh-relay uses for its access checks. `None` disables them.
+    pub relay_access_token: Option<String>,
 }
 
 pub struct AppState {
@@ -58,6 +61,7 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub ice_servers: Vec<String>,
     pub operator_token: Option<String>,
+    pub relay_access_token: Option<String>,
     pub iroh_public_addrs: Vec<String>,
 }
 
@@ -122,6 +126,7 @@ pub async fn start(config: Config) -> anyhow::Result<ServerHandle> {
         data_dir: config.data_dir.clone(),
         ice_servers: config.ice_servers.clone(),
         operator_token: config.operator_token.clone(),
+        relay_access_token: config.relay_access_token.clone(),
         iroh_public_addrs,
     });
 

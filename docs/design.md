@@ -176,8 +176,17 @@ Agent 端的分发逻辑**不关心底层传输**，两种来源都会被包装�
 - 编码：P0 用 RemoteFX（crate 自带）；P1 加 H.264（Media Foundation 硬件编码 → EGFX）。
 
 ### 6.3 自我更新与签名
-- Server 发布签名过的版本清单，Agent 下载、校验签名，交给独立的 updater 进程替换并重启。
-- 安装包和所有二进制文件必须 Authenticode 签名（远程控制软件不签名极易被杀软拦截 **[记忆]**）。
+两个相互独立的签名，保护不同的信任边界：
+
+1. **ed25519 发布签名（自我更新信任）** — Agent 在注册时固定（pin）release 公钥；`irmm-release sign/publish` 用离线私钥签名版本。Agent 下载后校验签名与 sha256，`Updater` trait（`SelfReplace`）替换二进制并以退出码 75 让服务管理器重启。被攻破的 Server 无法推送未被 operator 签名的二进制。网络级测试 `irmm-e2e/tests/update.rs` 覆盖「已签名版本下发给在线 Agent」与「拒绝非固定密钥签名的版本」。
+
+2. **操作系统代码签名（首次安装信任）** — 让 Gatekeeper / SmartScreen 信任初次下载的二进制，避免被杀软拦截 **[记忆]**。`irmm-release codesign --platform <p> --file <f>` 在 `publish` 前就地签名，由 `codesign::Signer` trait 分平台实现：
+   - macOS：`codesign`（`-` 为 ad-hoc；正式版用 Developer ID）。
+   - Windows：`osslsigncode` Authenticode（可在任意 OS 上对 PE 签名）。
+   - Linux：无标准，跳过（完整性由上面的 ed25519 签名保证）。
+   签名材料只从环境变量读取（由 Infisical 注入），缺失时报出需要设置的变量名而不是静默发布未签名二进制。Trait 级测试 `irmm-release/tests/codesign.rs` 用 ad-hoc 对真实 Mach-O 签名并验证签名有效 + 篡改可被检测。
+
+   正式发布需在 Infisical 加入：`IRMM_MACOS_SIGN_IDENTITY`（Developer ID Application 身份；notarization 另需 `IRMM_APPLE_ID`/`IRMM_APPLE_TEAM_ID`/`IRMM_APPLE_APP_PASSWORD`），`IRMM_WINDOWS_PKCS12`（.pfx 路径）+ `IRMM_WINDOWS_PKCS12_PASSWORD`。
 
 ---
 

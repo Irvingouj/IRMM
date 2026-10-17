@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 use clap::{Parser, Subcommand};
+use irmm_release::codesign;
 use sha2::{Digest as _, Sha256};
 
 #[derive(Parser)]
@@ -21,6 +22,16 @@ enum Cmd {
     Keygen {
         #[arg(long)]
         out: PathBuf,
+    },
+    /// OS-level code-sign a built binary in place (macOS codesign / Windows
+    /// Authenticode) so the initial install is trusted by the OS. Run before
+    /// `publish`. Signing material comes from the environment (Infisical).
+    Codesign {
+        /// e.g. linux-x86_64, macos-aarch64, windows-x86_64
+        #[arg(long)]
+        platform: String,
+        #[arg(long)]
+        file: PathBuf,
     },
     /// Print the signature for a build.
     Sign {
@@ -80,6 +91,12 @@ async fn main() -> anyhow::Result<()> {
             }
             std::io::Write::write_all(&mut f, hex::encode(key.to_bytes()).as_bytes())?;
             println!("{}", key.public());
+        }
+        Cmd::Codesign { platform, file } => {
+            let signer = codesign::for_platform(&platform)?;
+            signer.sign(&file)?;
+            signer.verify(&file)?;
+            println!("code-signed {}", file.display());
         }
         Cmd::Sign { key, version, platform, file } => {
             let (_, sig) = sign(&key, &version, &platform, &file)?;

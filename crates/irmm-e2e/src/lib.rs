@@ -94,6 +94,7 @@ impl TestEnv {
             data_dir: files.to_path_buf(),
             static_dir: None,
             ice_servers: vec![],
+            operator_token: Some(OPERATOR_TOKEN.into()),
         })
         .await
         .expect("start server");
@@ -107,6 +108,11 @@ impl TestEnv {
 
     pub fn url(&self) -> String {
         format!("http://{}", self.server.http_addr)
+    }
+
+    /// Client authenticated with the operator token (release publishing).
+    pub fn operator(&self) -> Api {
+        Api::new(self.url(), Some(OPERATOR_TOKEN.into()))
     }
 
     pub fn anon(&self) -> Api {
@@ -135,6 +141,8 @@ impl TestEnv {
         irmm_agent::start(self.agent_config(state_dir, token)).await.expect("start agent")
     }
 }
+
+pub const OPERATOR_TOKEN: &str = "test-operator-token";
 
 pub const PASSWORD: &str = "correct horse battery staple";
 

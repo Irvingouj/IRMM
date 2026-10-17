@@ -40,6 +40,8 @@ pub struct Config {
     pub static_dir: Option<PathBuf>,
     /// STUN/TURN URLs handed to agents and browsers for WebRTC.
     pub ice_servers: Vec<String>,
+    /// Bearer token for operator endpoints (release publishing). `None` disables them.
+    pub operator_token: Option<String>,
 }
 
 pub struct AppState {
@@ -52,6 +54,7 @@ pub struct AppState {
     pub release_key: PublicKey,
     pub data_dir: PathBuf,
     pub ice_servers: Vec<String>,
+    pub operator_token: Option<String>,
 }
 
 pub type State = Arc<AppState>;
@@ -107,6 +110,7 @@ pub async fn start(config: Config) -> anyhow::Result<ServerHandle> {
         release_key: config.release_key,
         data_dir: config.data_dir.clone(),
         ice_servers: config.ice_servers.clone(),
+        operator_token: config.operator_token.clone(),
     });
 
     let app = api::router(state.clone(), config.static_dir.as_deref());

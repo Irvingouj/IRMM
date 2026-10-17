@@ -28,3 +28,5 @@ ironrdp-tokio = { version = "0.10", features = ["reqwest-rustls-ring"] }
 ironrdp-rdcleanpath = "0.2"
 x509-cert = { version = "0.2", features = ["std"] }
 webrtc = "0.21"
+sha2 = "0.10"
+hex = "0.4"

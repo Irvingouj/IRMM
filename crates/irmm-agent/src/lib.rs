@@ -130,7 +130,14 @@ pub async fn start(config: Config) -> anyhow::Result<AgentHandle> {
                     let _ = state_tx.send(AgentState::Rejected { reason });
                     return;
                 }
-                Err(SessionEnd::Error(e)) => tracing::debug!(error = %format!("{e:#}"), "agent session ended"),
+                Err(SessionEnd::Error(e)) => {
+                    tracing::debug!(error = %format!("{e:#}"), "agent session ended");
+                    // The server may have moved; its identity stays pinned.
+                    let url = config.server_url_or(&file.server_url);
+                    if let Err(e) = file.refresh_addrs(&config.state_dir, &url).await {
+                        tracing::debug!(error = %format!("{e:#}"), "bootstrap refresh failed");
+                    }
+                }
             }
             let _ = state_tx.send(AgentState::Connecting);
             tokio::time::sleep(backoff).await;
@@ -155,11 +162,15 @@ impl<E: Into<anyhow::Error>> From<E> for SessionEnd {
     }
 }
 
-pub fn server_addr(file: &AgentStateFile) -> anyhow::Result<EndpointAddr> {
+/// The server's Iroh address; `direct_addrs` may be `host:port` names.
+pub async fn server_addr(file: &AgentStateFile) -> anyhow::Result<EndpointAddr> {
     let id: PublicKey = file.server_id.parse().context("server id")?;
     let mut addrs = Vec::new();
     for a in &file.direct_addrs {
-        addrs.push(TransportAddr::Ip(a.parse()?));
+        match tokio::net::lookup_host(a.as_str()).await {
+            Ok(resolved) => addrs.extend(resolved.map(TransportAddr::Ip)),
+            Err(e) => tracing::debug!(addr = %a, error = %e, "cannot resolve server address"),
+        }
     }
     if let Some(r) = &file.relay_url {
         addrs.push(TransportAddr::Relay(r.parse()?));
@@ -184,7 +195,10 @@ async fn session(
     endpoint: &Endpoint,
     state_tx: &watch::Sender<AgentState>,
 ) -> Result<(), SessionEnd> {
-    let conn: Connection = endpoint.connect(server_addr(file)?, irmm_proto::AGENT_ALPN).await?;
+    let addr = server_addr(file).await?;
+    let conn: Connection = tokio::time::timeout(Duration::from_secs(10), endpoint.connect(addr, irmm_proto::AGENT_ALPN))
+        .await
+        .context("connect timed out")??;
     let (mut send, mut recv) = conn.open_bi().await?;
     let info = inventory::collect(&config.version, config.desktop.monitors());
     let hello = match (file.device_id, &config.enroll_token) {

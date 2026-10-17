@@ -26,6 +26,9 @@ pub struct Config {
     pub http_addr: SocketAddr,
     /// UDP address of the agent-facing Iroh endpoint.
     pub iroh_addr: SocketAddr,
+    /// `host:port` addresses agents dial for the Iroh endpoint. Empty: the bound
+    /// address, or the public URL's host with the bound port when bound to 0.0.0.0/::.
+    pub iroh_public_addrs: Vec<String>,
     /// Externally reachable base URL, used in install commands. Defaults to `http://<http_addr>`.
     pub public_url: Option<String>,
     /// Server identity. Its public half is the `server_id` agents pin, and it signs session tickets.
@@ -55,6 +58,7 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub ice_servers: Vec<String>,
     pub operator_token: Option<String>,
+    pub iroh_public_addrs: Vec<String>,
 }
 
 pub type State = Arc<AppState>;
@@ -101,17 +105,24 @@ pub async fn start(config: Config) -> anyhow::Result<ServerHandle> {
     let http_addr = listener.local_addr()?;
     std::fs::create_dir_all(&config.data_dir)?;
 
+    let public_url = config.public_url.clone().unwrap_or_else(|| format!("http://{http_addr}"));
+    let iroh_public_addrs = if config.iroh_public_addrs.is_empty() {
+        advertised_addrs(&endpoint.bound_sockets(), &public_url)
+    } else {
+        config.iroh_public_addrs.clone()
+    };
     let state = Arc::new(AppState {
         pool,
         endpoint: endpoint.clone(),
         secret_key: config.secret_key.clone(),
         agents: Agents::default(),
-        public_url: config.public_url.clone().unwrap_or_else(|| format!("http://{http_addr}")),
+        public_url,
         relay_url: config.relay_url.clone(),
         release_key: config.release_key,
         data_dir: config.data_dir.clone(),
         ice_servers: config.ice_servers.clone(),
         operator_token: config.operator_token.clone(),
+        iroh_public_addrs,
     });
 
     let app = api::router(state.clone(), config.static_dir.as_deref());
@@ -129,4 +140,19 @@ pub async fn start(config: Config) -> anyhow::Result<ServerHandle> {
         state,
         tasks: vec![http, hub],
     })
+}
+
+fn advertised_addrs(bound: &[SocketAddr], public_url: &str) -> Vec<String> {
+    let host = public_url.parse::<axum::http::Uri>().ok().and_then(|u| u.host().map(str::to_owned));
+    let mut out: Vec<String> = Vec::new();
+    for a in bound {
+        let s = match (&host, a.ip().is_unspecified()) {
+            (Some(h), true) => format!("{h}:{}", a.port()),
+            _ => a.to_string(),
+        };
+        if !out.contains(&s) {
+            out.push(s);
+        }
+    }
+    out
 }

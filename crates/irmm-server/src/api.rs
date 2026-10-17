@@ -45,7 +45,7 @@ pub fn router(st: crate::State, static_dir: Option<&Path>) -> Router {
 async fn bootstrap(State(st): State<crate::State>) -> Json<irmm_proto::Bootstrap> {
     Json(irmm_proto::Bootstrap {
         server_id: st.endpoint.id().to_string(),
-        direct_addrs: st.endpoint.bound_sockets().iter().map(ToString::to_string).collect(),
+        direct_addrs: st.iroh_public_addrs.clone(),
         relay_url: st.relay_url.clone(),
         release_key: st.release_key.to_string(),
         ice_servers: st.ice_servers.clone(),

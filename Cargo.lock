@@ -2913,6 +2913,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "irmm-release"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hex",
+ "irmm-proto",
+ "iroh",
+ "reqwest 0.12.28",
+ "sha2 0.10.9",
+ "tokio",
+]
+
+[[package]]
 name = "irmm-server"
 version = "0.1.0"
 dependencies = [

@@ -41,8 +41,7 @@ impl AgentStateFile {
             return Ok(s);
         }
         anyhow::ensure!(!server_url.is_empty(), "no saved state and no server URL");
-        let url = format!("{}/api/agent/bootstrap", server_url.trim_end_matches('/'));
-        let b: irmm_proto::Bootstrap = reqwest::get(&url).await?.error_for_status()?.json().await.context("bootstrap")?;
+        let b = fetch_bootstrap(server_url).await?;
         let s = Self {
             server_url: server_url.trim_end_matches('/').to_owned(),
             secret_key: hex::encode(iroh::SecretKey::generate().to_bytes()),
@@ -55,6 +54,20 @@ impl AgentStateFile {
         };
         s.save(dir)?;
         Ok(s)
+    }
+
+    /// Re-reads the server's addresses from its bootstrap endpoint. The server and
+    /// release keys pinned at enrollment must not change.
+    pub async fn refresh_addrs(&mut self, dir: &Path, server_url: &str) -> anyhow::Result<()> {
+        let b = fetch_bootstrap(server_url).await?;
+        anyhow::ensure!(b.server_id == self.server_id && b.release_key == self.release_key, "server identity changed");
+        if (&b.direct_addrs, &b.relay_url, &b.ice_servers) != (&self.direct_addrs, &self.relay_url, &self.ice_servers) {
+            self.direct_addrs = b.direct_addrs;
+            self.relay_url = b.relay_url;
+            self.ice_servers = b.ice_servers;
+            self.save(dir)?;
+        }
+        Ok(())
     }
 
     pub fn save(&self, dir: &Path) -> anyhow::Result<()> {
@@ -77,4 +90,9 @@ fn restrict_permissions(p: &Path) {
 #[cfg(not(unix))]
 fn restrict_permissions(_p: &Path) {
     // The state directory under %ProgramData% is ACL'd to SYSTEM/Administrators by the installer.
+}
+
+async fn fetch_bootstrap(server_url: &str) -> anyhow::Result<irmm_proto::Bootstrap> {
+    let url = format!("{}/api/agent/bootstrap", server_url.trim_end_matches('/'));
+    reqwest::get(&url).await?.error_for_status()?.json().await.context("bootstrap")
 }

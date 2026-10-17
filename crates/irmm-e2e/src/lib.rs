@@ -20,6 +20,19 @@ fn admin_db_url() -> String {
     std::env::var("IRMM_TEST_PG").unwrap_or_else(|_| "postgres://postgres:irmm@127.0.0.1:55432".into())
 }
 
+/// Creates an empty database and returns its URL.
+pub async fn fresh_database() -> String {
+    let db_name = format!("irmm_test_{}", uuid::Uuid::new_v4().simple());
+    let admin = admin_db_url();
+    let mut conn = <sqlx::PgConnection as sqlx::Connection>::connect(&format!("{admin}/postgres"))
+        .await
+        .expect("connect to test postgres (start it with: docker start irmm-test-pg)");
+    sqlx::Executor::execute(&mut conn, format!("CREATE DATABASE {db_name}").as_str())
+        .await
+        .expect("create test db");
+    format!("{admin}/{db_name}")
+}
+
 pub fn init_tracing() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "warn".into()))
@@ -72,21 +85,14 @@ pub mod tempdir {
 impl TestEnv {
     pub async fn start() -> Self {
         init_tracing();
-        let db_name = format!("irmm_test_{}", uuid::Uuid::new_v4().simple());
-        let admin = admin_db_url();
-        let mut conn = <sqlx::PgConnection as sqlx::Connection>::connect(&format!("{admin}/postgres"))
-            .await
-            .expect("connect to test postgres (start it with: docker start irmm-test-pg)");
-        sqlx::Executor::execute(&mut conn, format!("CREATE DATABASE {db_name}").as_str())
-            .await
-            .expect("create test db");
-        let db_url = format!("{admin}/{db_name}");
+        let db_url = fresh_database().await;
         let release_key = iroh::SecretKey::generate();
         let files = tempdir::Dir::new();
         let server = irmm_server::start(irmm_server::Config {
             database_url: db_url.clone(),
             http_addr: "127.0.0.1:0".parse().unwrap(),
             iroh_addr: "127.0.0.1:0".parse().unwrap(),
+            iroh_public_addrs: vec![],
             public_url: None,
             secret_key: iroh::SecretKey::generate(),
             relay_url: None,
@@ -147,12 +153,20 @@ pub const OPERATOR_TOKEN: &str = "test-operator-token";
 pub const PASSWORD: &str = "correct horse battery staple";
 
 /// Polls `f` until it returns `Some`, failing after 20 s.
-pub async fn eventually<T, F, Fut>(what: &str, mut f: F) -> T
+pub async fn eventually<T, F, Fut>(what: &str, f: F) -> T
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Option<T>>,
 {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    eventually_for(Duration::from_secs(20), what, f).await
+}
+
+pub async fn eventually_for<T, F, Fut>(limit: Duration, what: &str, mut f: F) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Option<T>>,
+{
+    let deadline = tokio::time::Instant::now() + limit;
     loop {
         if let Some(v) = f().await {
             return v;
@@ -394,17 +408,18 @@ pub async fn enrolled_agent_with_desktop(
 /// Path to the real `irmm-agent` executable, built on first use.
 pub fn agent_binary() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    BUILT
-        .get_or_init(|| {
-            let status = std::process::Command::new(env!("CARGO"))
-                .args(["build", "-q", "-p", "irmm-agent", "--bin", "irmm-agent"])
-                .current_dir(env!("CARGO_MANIFEST_DIR"))
-                .status()
-                .expect("run cargo build");
-            assert!(status.success(), "building irmm-agent failed");
-            // target/<profile>/deps/<test> -> target/<profile>/irmm-agent
-            let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-            profile_dir.join(format!("irmm-agent{}", std::env::consts::EXE_SUFFIX))
-        })
-        .clone()
+    BUILT.get_or_init(|| workspace_binary("irmm-agent", "irmm-agent")).clone()
+}
+
+/// Builds a binary of a workspace package and returns its path.
+pub fn workspace_binary(package: &str, bin: &str) -> PathBuf {
+    let status = std::process::Command::new(env!("CARGO"))
+        .args(["build", "-q", "-p", package, "--bin", bin])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .status()
+        .expect("run cargo build");
+    assert!(status.success(), "building {bin} failed");
+    // target/<profile>/deps/<test> -> target/<profile>/<bin>
+    let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+    profile_dir.join(format!("{bin}{}", std::env::consts::EXE_SUFFIX))
 }

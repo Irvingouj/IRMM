@@ -28,12 +28,21 @@ pub struct AgentLink {
 pub struct Agents {
     links: Arc<Mutex<HashMap<Uuid, AgentLink>>>,
     pending_rtc: Arc<Mutex<HashMap<Uuid, oneshot::Sender<Result<String, String>>>>>,
+    used_jti: Arc<Mutex<HashMap<Uuid, u64>>>,
     next_id: Arc<AtomicU64>,
 }
 
 impl Agents {
     pub fn is_online(&self, device: Uuid) -> bool {
         self.links.lock().unwrap().contains_key(&device)
+    }
+
+    /// Records a ticket id; false if it was already used.
+    pub fn consume_jti(&self, jti: Uuid, exp: u64) -> bool {
+        let mut used = self.used_jti.lock().unwrap();
+        let now = irmm_proto::now_secs();
+        used.retain(|_, e| *e >= now);
+        used.insert(jti, exp).is_none()
     }
 
     pub fn get(&self, device: Uuid) -> Option<AgentLink> {

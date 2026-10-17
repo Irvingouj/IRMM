@@ -303,3 +303,63 @@ pub async fn enrolled_agent(env: &TestEnv, admin: &Api) -> (AgentHandle, uuid::U
     let id = wait_agent_online(&agent).await;
     (agent, id, dir)
 }
+
+/// Native shell for scripts on the machine running the tests.
+pub fn native_shell() -> &'static str {
+    if cfg!(windows) { "powershell" } else { "sh" }
+}
+
+/// Opens a WebSocket and exposes it as a byte stream (binary messages are stream chunks).
+pub async fn ws_stream(url: &str) -> anyhow::Result<tokio::io::DuplexStream> {
+    use futures::{SinkExt as _, StreamExt as _};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (ws, _) = tokio_tungstenite::connect_async(url).await?;
+    let (mut sink, mut stream) = ws.split();
+    let (ours, theirs) = tokio::io::duplex(1 << 20);
+    let (mut rd, mut wr) = tokio::io::split(theirs);
+    tokio::spawn(async move {
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            match rd.read(&mut buf).await {
+                Ok(0) | Err(_) => {
+                    let _ = sink.send(Message::Close(None)).await;
+                    break;
+                }
+                Ok(n) => {
+                    if sink.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    tokio::spawn(async move {
+        while let Some(Ok(msg)) = stream.next().await {
+            match msg {
+                Message::Binary(b) => {
+                    if wr.write_all(&b).await.is_err() {
+                        break;
+                    }
+                }
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+        let _ = wr.shutdown().await;
+    });
+    Ok(ours)
+}
+
+/// Creates a session and opens its channel through the WSS gateway.
+pub async fn gateway_channel(env: &TestEnv, user: &Api, device: uuid::Uuid, kind: &str) -> anyhow::Result<tokio::io::DuplexStream> {
+    let s = user.post(&format!("/api/devices/{device}/sessions"), json!({"kind": kind})).await;
+    anyhow::ensure!(s.status.is_success(), "create session: {} {}", s.status, s.body);
+    let ticket = s.body["ticket"].as_str().context("ticket")?;
+    ws_stream(&gateway_url(env, device, ticket)).await
+}
+
+pub fn gateway_url(env: &TestEnv, device: uuid::Uuid, ticket: &str) -> String {
+    format!("ws://{}/api/gw/{device}?ticket={ticket}", env.server.http_addr)
+}

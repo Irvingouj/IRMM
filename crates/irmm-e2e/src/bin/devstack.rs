@@ -23,6 +23,11 @@ struct Ctl {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Logs to stderr; stdout carries only the one JSON handshake line.
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,iroh=warn,noq=warn,noq_proto=warn".into()))
+        .with_writer(std::io::stderr)
+        .init();
     let web = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/dist");
     let env = TestEnv::start_with_console(Some(web.canonicalize()?)).await;
     let desktop = FakeDesktop::default();

@@ -1,0 +1,19 @@
+:root { font-family: system-ui, sans-serif; color: #e8e8e8; background: #1b1b1f; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: #6cb6ff; cursor: pointer; }
+button, input, select { font: inherit; }
+button { background: #2d6cdf; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button.secondary { background: #3a3a42; }
+button:disabled { opacity: 0.5; cursor: default; }
+input, select { background: #26262c; color: #e8e8e8; border: 1px solid #3a3a42; border-radius: 6px; padding: 6px 8px; }
+label { display: block; margin: 8px 0; }
+label span { display: block; font-size: 12px; color: #a0a0a8; margin-bottom: 2px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #2d2d34; }
+nav a { margin-right: 16px; }
+.row { display: flex; gap: 12px; align-items: center; }
+.card { background: #26262c; border: 1px solid #2d2d34; border-radius: 8px; padding: 16px; margin: 12px 0; }
+.err { color: #ff6b6b; }
+.pill { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #3a3a42; }
+.online { background: #1c6b3a; }

@@ -98,7 +98,9 @@ impl PeerConnectionEventHandler for Answerer {
 
     async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
         tracing::debug!(%state, "webrtc connection state");
-        if matches!(state, RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed | RTCPeerConnectionState::Disconnected) {
+        // `Disconnected` is recoverable (a transient consent/ICE blip); only tear the
+        // peer connection down when it is permanently `Failed` or `Closed`.
+        if matches!(state, RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed) {
             let _ = self.ended.try_send(());
         }
     }

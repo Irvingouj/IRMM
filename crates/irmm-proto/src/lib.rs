@@ -287,4 +287,7 @@ pub struct Bootstrap {
     pub direct_addrs: Vec<String>,
     pub relay_url: Option<String>,
     pub release_key: String,
+    /// STUN/TURN URLs for WebRTC.
+    #[serde(default)]
+    pub ice_servers: Vec<String>,
 }

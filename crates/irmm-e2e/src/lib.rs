@@ -1,6 +1,7 @@
 //! Test kit: real Postgres, real server, real agents, talking over real sockets.
 
 pub mod rdp;
+pub mod rtc;
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -92,6 +93,7 @@ impl TestEnv {
             release_key: release_key.public(),
             data_dir: files.to_path_buf(),
             static_dir: None,
+            ice_servers: vec![],
         })
         .await
         .expect("start server");

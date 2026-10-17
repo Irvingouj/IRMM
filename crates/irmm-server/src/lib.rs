@@ -38,6 +38,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Built web console (`web/dist`).
     pub static_dir: Option<PathBuf>,
+    /// STUN/TURN URLs handed to agents and browsers for WebRTC.
+    pub ice_servers: Vec<String>,
 }
 
 pub struct AppState {
@@ -49,6 +51,7 @@ pub struct AppState {
     pub relay_url: Option<String>,
     pub release_key: PublicKey,
     pub data_dir: PathBuf,
+    pub ice_servers: Vec<String>,
 }
 
 pub type State = Arc<AppState>;
@@ -103,6 +106,7 @@ pub async fn start(config: Config) -> anyhow::Result<ServerHandle> {
         relay_url: config.relay_url.clone(),
         release_key: config.release_key,
         data_dir: config.data_dir.clone(),
+        ice_servers: config.ice_servers.clone(),
     });
 
     let app = api::router(state.clone(), config.static_dir.as_deref());

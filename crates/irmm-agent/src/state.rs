@@ -14,6 +14,8 @@ pub struct AgentStateFile {
     pub direct_addrs: Vec<String>,
     pub relay_url: Option<String>,
     pub release_key: String,
+    #[serde(default)]
+    pub ice_servers: Vec<String>,
     pub device_id: Option<Uuid>,
 }
 
@@ -48,6 +50,7 @@ impl AgentStateFile {
             direct_addrs: b.direct_addrs,
             relay_url: b.relay_url,
             release_key: b.release_key,
+            ice_servers: b.ice_servers,
             device_id: None,
         };
         s.save(dir)?;

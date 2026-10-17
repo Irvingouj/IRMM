@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+pub use channels::rtc;
 pub use channels::{AsyncStream, DesktopProvider, InProcessDesktop, NoDesktop};
 pub use state::AgentStateFile;
 
@@ -160,6 +161,7 @@ pub struct Ctx {
     pub server_id: PublicKey,
     pub desktop: Arc<dyn DesktopProvider>,
     pub used_tickets: Arc<std::sync::Mutex<std::collections::HashSet<Uuid>>>,
+    pub ice_servers: Vec<String>,
     pub to_server: mpsc::UnboundedSender<AgentMsg>,
 }
 
@@ -195,6 +197,7 @@ async fn session(
         server_id: file.server_id.parse().context("server id")?,
         desktop: config.desktop.clone(),
         used_tickets: Default::default(),
+        ice_servers: file.ice_servers.clone(),
         to_server: out_tx.clone(),
     };
 

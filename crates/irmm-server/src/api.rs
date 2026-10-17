@@ -48,6 +48,7 @@ async fn bootstrap(State(st): State<crate::State>) -> Json<irmm_proto::Bootstrap
         direct_addrs: st.endpoint.bound_sockets().iter().map(ToString::to_string).collect(),
         relay_url: st.relay_url.clone(),
         release_key: st.release_key.to_string(),
+        ice_servers: st.ice_servers.clone(),
     })
 }
 
@@ -332,6 +333,7 @@ async fn create_session(
         "session_id": session_id,
         "kind": req.kind,
         "ticket": issue_ticket(&st, &user, device, session_id, req.kind, req.monitor),
+        "ice_servers": st.ice_servers,
     })))
 }
 

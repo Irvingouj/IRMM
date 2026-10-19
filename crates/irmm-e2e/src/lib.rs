@@ -1,5 +1,6 @@
 //! Test kit: real Postgres, real server, real agents, talking over real sockets.
 
+pub mod mesh;
 pub mod rdp;
 pub mod rtc;
 

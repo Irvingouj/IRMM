@@ -20,7 +20,7 @@
 {#if error}<p class="err">{error}</p>{/if}
 <table>
   <thead>
-    <tr><th>Host</th><th>Client / Site</th><th>OS</th><th>Status</th></tr>
+    <tr><th>Host</th><th>Client / Site</th><th>OS</th><th>Mesh IP</th><th>Status</th></tr>
   </thead>
   <tbody>
     {#each devices as d (d.id)}
@@ -28,6 +28,7 @@
         <td><a href="#" on:click|preventDefault={() => openDevice.set(d.id)}>{d.hostname || d.id}</a></td>
         <td>{d.client_name} / {d.site_name}</td>
         <td>{d.os} {d.os_version}</td>
+        <td>{d.mesh_ipv4 || ''}</td>
         <td><span class="pill {d.online ? 'online' : ''}">{d.online ? 'online' : 'offline'}</span></td>
       </tr>
     {/each}

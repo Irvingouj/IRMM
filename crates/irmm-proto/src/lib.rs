@@ -126,6 +126,17 @@ pub enum ServerMsg {
     /// Non-trickle WebRTC offer: all ICE candidates are already in the SDP.
     RtcOffer { req_id: Uuid, sdp: String },
     Update(ReleaseInfo),
+    /// Sent after `Welcome` and whenever it changes; `None`: mesh is off for this device.
+    Mesh { config: Option<MeshConfig> },
+}
+
+/// The device's place in its client's mesh network.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MeshConfig {
+    /// Own address, with the length of the client's IPv4 range (e.g. `100.88.0.1/16`).
+    pub ipv4: ipnet::Ipv4Net,
+    /// Own address, with the length of the client's ULA prefix (`/48`).
+    pub ipv6: ipnet::Ipv6Net,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use axum::extract::{Path as UrlPath, Query, State};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use irmm_proto::{ChannelKind, TicketClaims};
 use serde::Deserialize;
@@ -22,6 +22,7 @@ pub fn router(st: crate::State, static_dir: Option<&Path>) -> Router {
         .route("/api/users", get(list_users).post(create_user))
         .route("/api/clients", get(list_clients).post(create_client))
         .route("/api/clients/{id}/sites", get(list_sites).post(create_site))
+        .route("/api/clients/{id}/mesh", put(set_mesh))
         .route("/api/sites/{id}/enroll-tokens", post(create_enroll_token))
         .route("/api/devices", get(list_devices))
         .route("/api/devices/{id}", get(get_device))
@@ -124,15 +125,56 @@ async fn create_user(State(st): State<crate::State>, user: AuthUser, Json(req): 
     Ok(Json(json!({"id": id})))
 }
 
+type ClientRow = (Uuid, String, bool, String, Option<String>);
+
+const CLIENT_SELECT: &str = "SELECT id, name, mesh_enabled, mesh_ipv4_range::text, mesh_ipv6_prefix::text FROM clients
+     WHERE ($1::uuid[] IS NULL OR id = ANY($1))";
+
+fn client_json((id, name, mesh_enabled, range, prefix): ClientRow) -> Value {
+    json!({"id": id, "name": name, "mesh_enabled": mesh_enabled, "mesh_ipv4_range": range, "mesh_ipv6_prefix": prefix})
+}
+
 async fn list_clients(State(st): State<crate::State>, user: AuthUser) -> ApiResult<Json<Value>> {
     let mut tx = user.tx(&st).await?;
-    let rows: Vec<(Uuid, String)> = sqlx::query_as(
-        "SELECT id, name FROM clients WHERE ($1::uuid[] IS NULL OR id = ANY($1)) ORDER BY name",
-    )
-    .bind(&user.clients)
-    .fetch_all(&mut *tx)
-    .await?;
-    Ok(Json(Value::Array(rows.into_iter().map(|(id, name)| json!({"id": id, "name": name})).collect())))
+    let rows: Vec<ClientRow> = sqlx::query_as(&format!("{CLIENT_SELECT} ORDER BY name"))
+        .bind(&user.clients)
+        .fetch_all(&mut *tx)
+        .await?;
+    Ok(Json(Value::Array(rows.into_iter().map(client_json).collect())))
+}
+
+#[derive(Deserialize)]
+struct MeshReq {
+    enabled: bool,
+}
+
+/// Turns the client's mesh network on or off and pushes the change to its online devices.
+async fn set_mesh(
+    State(st): State<crate::State>,
+    user: AuthUser,
+    UrlPath(client): UrlPath<Uuid>,
+    Json(req): Json<MeshReq>,
+) -> ApiResult<Json<Value>> {
+    let mut tx = user.tx(&st).await?;
+    visible_client(&mut tx, &user, client).await?;
+    user.require(Role::Admin)?;
+    sqlx::query("UPDATE clients SET mesh_enabled = $2 WHERE id = $1")
+        .bind(client)
+        .bind(req.enabled)
+        .execute(&mut *tx)
+        .await?;
+    crate::mesh::ensure_addrs(&mut tx, client).await?;
+    audit(&mut tx, user.tenant_id, user.actor(), "client.mesh", Some(client.to_string()), json!({"enabled": req.enabled})).await?;
+    let row: ClientRow = sqlx::query_as(&format!("{CLIENT_SELECT} AND id = $2"))
+        .bind(&user.clients)
+        .bind(client)
+        .fetch_one(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    if let Err(e) = crate::mesh::push_client(&st, user.tenant_id, client).await {
+        tracing::warn!(error = %format!("{e:#}"), %client, "mesh config push");
+    }
+    Ok(Json(client_json(row)))
 }
 
 #[derive(Deserialize)]
@@ -259,15 +301,18 @@ type DeviceRow = (
     String,
     String,
     Value,
+    Option<String>,
+    Option<String>,
 );
 
 const DEVICE_SELECT: &str = "SELECT d.id, d.site_id, s.client_id, s.name, c.name, d.hostname, d.os, d.os_version,
-        d.agent_version, d.last_seen, d.arch, d.node_id, d.inventory
+        d.agent_version, d.last_seen, d.arch, d.node_id, d.inventory, host(m.ipv4), host(m.ipv6)
      FROM devices d JOIN sites s ON s.id = d.site_id JOIN clients c ON c.id = s.client_id
+     LEFT JOIN mesh_addrs m ON m.device_id = d.id AND c.mesh_enabled
      WHERE ($1::uuid[] IS NULL OR s.client_id = ANY($1))";
 
 fn device_json(st: &crate::AppState, r: DeviceRow, with_inventory: bool) -> Value {
-    let (id, site_id, client_id, site_name, client_name, hostname, os, os_version, agent_version, last_seen, arch, _node, inv) = r;
+    let (id, site_id, client_id, site_name, client_name, hostname, os, os_version, agent_version, last_seen, arch, _node, inv, mesh_ipv4, mesh_ipv6) = r;
     let mut v = json!({
         "id": id,
         "site_id": site_id,
@@ -281,6 +326,8 @@ fn device_json(st: &crate::AppState, r: DeviceRow, with_inventory: bool) -> Valu
         "agent_version": agent_version,
         "last_seen": last_seen,
         "online": st.agents.is_online(id),
+        "mesh_ipv4": mesh_ipv4,
+        "mesh_ipv6": mesh_ipv6,
     });
     if with_inventory {
         v["inventory"] = inv;

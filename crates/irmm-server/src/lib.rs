@@ -8,6 +8,7 @@ mod error;
 mod gateway;
 mod install;
 mod jobs;
+mod mesh;
 mod relay;
 mod releases;
 
@@ -63,6 +64,8 @@ pub struct AppState {
     pub operator_token: Option<String>,
     pub relay_access_token: Option<String>,
     pub iroh_public_addrs: Vec<String>,
+    /// Orders mesh config pushes (see `mesh::send_configs`).
+    mesh_push: tokio::sync::Mutex<()>,
 }
 
 pub type State = Arc<AppState>;
@@ -128,6 +131,7 @@ pub async fn start(config: Config) -> anyhow::Result<ServerHandle> {
         operator_token: config.operator_token.clone(),
         relay_access_token: config.relay_access_token.clone(),
         iroh_public_addrs,
+        mesh_push: Default::default(),
     });
 
     let app = api::router(state.clone(), config.static_dir.as_deref());

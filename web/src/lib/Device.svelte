@@ -37,6 +37,13 @@
     <span>{device.os} {device.os_version} · {device.arch}</span>
   </div>
 
+  {#if device.mesh_ipv4}
+    <div class="card" data-testid="mesh">
+      <div class="row"><strong>Mesh IPv4</strong><span>{device.mesh_ipv4}</span></div>
+      <div class="row"><strong>Mesh IPv6</strong><span>{device.mesh_ipv6}</span></div>
+    </div>
+  {/if}
+
   <div class="card" data-testid="inventory">
     {#if device.inventory}
       {@const inv = device.inventory}

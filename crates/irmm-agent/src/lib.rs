@@ -4,6 +4,7 @@
 mod channels;
 pub mod install;
 mod inventory;
+mod mesh;
 mod scripts;
 mod state;
 pub mod update;
@@ -22,6 +23,7 @@ use uuid::Uuid;
 
 pub use channels::rtc;
 pub use channels::{AsyncStream, DesktopProvider, InProcessDesktop, NoDesktop};
+pub use mesh::{MeshInterface, NetworkPlatform, NoNetwork};
 pub use state::AgentStateFile;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -37,6 +39,7 @@ pub struct Config {
     pub version: String,
     pub desktop: Arc<dyn DesktopProvider>,
     pub updater: Arc<dyn update::Updater>,
+    pub network: Arc<dyn NetworkPlatform>,
 }
 
 impl Config {
@@ -50,6 +53,7 @@ impl Config {
             version: VERSION.to_owned(),
             desktop: Arc::new(NoDesktop),
             updater: Arc::new(update::SelfReplace),
+            network: Arc::new(NoNetwork),
         }
     }
 
@@ -119,11 +123,13 @@ pub async fn start(config: Config) -> anyhow::Result<AgentHandle> {
         .await
         .context("bind agent endpoint")?;
     let (state_tx, state_rx) = watch::channel(AgentState::Connecting);
+    let (mesh_tx, mesh_rx) = watch::channel(None);
     let ep = endpoint.clone();
     let task = tokio::spawn(async move {
+        let _mesh = AbortOnDrop(tokio::spawn(mesh::run(config.network.clone(), mesh_rx)));
         let mut backoff = Duration::from_millis(200);
         loop {
-            match session(&config, &mut file, &ep, &state_tx).await {
+            match session(&config, &mut file, &ep, &state_tx, &mesh_tx).await {
                 Ok(()) => backoff = Duration::from_millis(200),
                 Err(SessionEnd::Rejected(reason)) => {
                     tracing::warn!(%reason, "server rejected agent");
@@ -149,6 +155,14 @@ pub async fn start(config: Config) -> anyhow::Result<AgentHandle> {
         task,
         endpoint,
     })
+}
+
+struct AbortOnDrop(JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 enum SessionEnd {
@@ -194,6 +208,7 @@ async fn session(
     file: &mut AgentStateFile,
     endpoint: &Endpoint,
     state_tx: &watch::Sender<AgentState>,
+    mesh_tx: &watch::Sender<Option<irmm_proto::MeshConfig>>,
 ) -> Result<(), SessionEnd> {
     let addr = server_addr(file).await?;
     let conn: Connection = tokio::time::timeout(Duration::from_secs(10), endpoint.connect(addr, irmm_proto::AGENT_ALPN))
@@ -268,6 +283,7 @@ async fn session(
     let release_key: PublicKey = file.release_key.parse().context("release key")?;
     let server_url = config.server_url_or(&file.server_url);
     let my_version = config.version.clone();
+    let mesh_tx = mesh_tx.clone();
     tasks.spawn(async move {
         while let Some(msg) = read_frame::<_, ServerMsg>(&mut recv).await? {
             match msg {
@@ -296,6 +312,9 @@ async fn session(
                             let _ = tx.send(AgentMsg::UpdateStatus { version: release.version.clone(), error });
                         });
                     }
+                }
+                ServerMsg::Mesh { config } => {
+                    mesh_tx.send_replace(config);
                 }
                 ServerMsg::Welcome { .. } | ServerMsg::Rejected { .. } => bail!("unexpected server message"),
             }

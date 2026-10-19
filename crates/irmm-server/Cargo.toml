@@ -19,6 +19,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 iroh.workspace = true
+ipnet.workspace = true
 irmm-proto.workspace = true
 axum = { version = "0.8", features = ["ws", "multipart"] }
 tower-http = { version = "0.6", features = ["fs", "trace"] }

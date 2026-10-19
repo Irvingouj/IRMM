@@ -130,3 +130,18 @@ test('users and audit log', async () => {
   await expect(page.getByRole('table')).toContainText('device.enroll');
   await expect(page.getByRole('table')).toContainText('user.create');
 });
+
+test('enable mesh for a client; device shows its mesh addresses', async () => {
+  await page.getByRole('link', { name: 'Clients' }).click();
+  const mesh = page.getByRole('checkbox', { name: 'Mesh VPN' });
+  await expect(mesh).not.toBeChecked();
+  await mesh.check();
+  await expect(page.getByTestId('mesh-range')).toContainText('100.88.0.0/16');
+
+  await page.getByRole('link', { name: 'Devices' }).click();
+  const row = page.getByTestId(`device-${deviceId}`);
+  await expect(row).toContainText('100.88.0.1');
+  await row.getByRole('link').first().click();
+  await expect(page.getByTestId('mesh')).toContainText('100.88.0.1');
+  await expect(page.getByTestId('mesh')).toContainText(/fd[0-9a-f]{2}:/);
+});

@@ -30,6 +30,14 @@
     newSite = '';
     await selectClient(openClient);
   }
+  async function setMesh(c, enabled) {
+    try {
+      Object.assign(c, await api.put(`/api/clients/${c.id}/mesh`, { enabled }));
+      clients = clients;
+    } catch (e) {
+      error = e.message;
+    }
+  }
   async function makeToken(site) {
     token = await api.post(`/api/sites/${site.id}/enroll-tokens`, { max_uses: 10, ttl_hours: 24 });
   }
@@ -44,7 +52,16 @@
 
 {#each clients as c (c.id)}
   <div class="card">
-    <button class="secondary" on:click={() => selectClient(c)}>{c.name}</button>
+    <div class="row">
+      <button class="secondary" on:click={() => selectClient(c)}>{c.name}</button>
+      <label class="row" style="margin:0">
+        <input type="checkbox" checked={c.mesh_enabled} on:change={(e) => setMesh(c, e.currentTarget.checked)} />
+        Mesh VPN
+      </label>
+      {#if c.mesh_enabled}
+        <span data-testid="mesh-range">{c.mesh_ipv4_range} · {c.mesh_ipv6_prefix}</span>
+      {/if}
+    </div>
     {#if openClient?.id === c.id}
       <div style="margin-top:12px">
         <div class="row">

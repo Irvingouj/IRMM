@@ -162,6 +162,9 @@ async fn serve_agent(st: crate::State, conn: Connection) -> anyhow::Result<()> {
         },
     );
     crate::releases::offer_update(&st, device_id).await;
+    if let Err(e) = crate::mesh::on_connect(&st, device_id, tenant_id).await {
+        tracing::warn!(error = %format!("{e:#}"), device = %device_id, "mesh config");
+    }
 
     let writer = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
